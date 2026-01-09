@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Historical Markers Map - Mobile Friendly</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+body { margin: 0; font-family: Arial, sans-serif; }
+#map { height: 100vh; width: 100%; }
+.saved-msg { display:none; color:green; font-size:12px; margin-top:4px; }
+#search-container {
+  position:absolute;
+  top:10px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:10;
+  background:white;
+  padding:8px 10px;
+  border-radius:6px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  display:flex;
+  gap:6px;
+  flex-wrap: wrap;
+}
+#search-input { width:200px; padding:8px; font-size:16px; }
+#search-btn { padding:10px 12px; font-size:16px; cursor:pointer; }
+@media (max-width:480px){
+  #search-container {
+    top:5px;
+    left:5px;
+    transform:none;
+    width:calc(100% - 10px);
+    flex-direction: column;
+    gap:4px;
+  }
+  #search-input, #search-btn { width:100%; font-size:16px; }
+}
+.mapboxgl-popup-content {
+  max-height: 50vh; 
+  overflow-y: auto;
+}
+</style>
+</head>
+<body>
+
+<div id="search-container">
+  <input type="text" id="search-input" placeholder="Name or Marker #">
+  <button id="search-btn">Search</button>
+</div>
+
+<div id="map"></div>
+
+<script>
+// ===== MAPBOX =====
+mapboxgl.accessToken = "pk.eyJ1IjoiY3J0YWxsZXkiLCJhIjoiY21rNnhsZTBkMHk4ODNlb202azJyM3JmaSJ9.jCw9qqX8H4Rl2sLR0i3h-g";
+const map = new mapboxgl.Map({
+  container: "map",
+  style: "mapbox://styles/mapbox/streets-v12",
+  center: [-96.334, 30.633],
+  zoom: 11
+});
+
+// ===== FIREBASE =====
+firebase.initializeApp({
+  apiKey: "AIzaSyCF8oMdleFjzoC0QSJeq3BGBa1BUx8Mog8",
+  databaseURL: "https://historicalmarkersmap-default-rtdb.firebaseio.com"
+});
+const db = firebase.database();
+
+// ===== RESTORED STORAGE =====
+const restoredMarkers = new Set();
+
+// Helper for marker color
+function markerColorExpression() {
+  return [
+    "case",
+    ["in", ["to-string", ["coalesce", ["get", "MarkerNum"], ["get", "markernum"]]], ["literal", Array.from(restoredMarkers)]],
+    "#28a745", "#c1121f"
+  ];
+}
+
+// ===== MAP LOAD =====
+map.on("load", () => {
+
+  // Add markers source and layer
+  map.addSource("markers", {
+    type: "vector",
+    url: "mapbox://crtalley.c4hs1q9k"
+  });
+  map.addLayer({
+    id: "markers-layer",
+    type: "circle",
+    source: "markers",
+    "source-layer": "HistoricalMarkers",
+    paint: {
+      "circle-radius": 6,
+      "circle-color": markerColorExpression(),
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#ffffff"
+    }
+  });
+
+  map.on("mouseenter", "markers-layer", () => map.getCanvas().style.cursor = "pointer");
+  map.on("mouseleave", "markers-layer", () => map.getCanvas().style.cursor = "");
+
+  // ===== REAL-TIME SYNC =====
+  db.ref("markers").on("value", snapshot => {
+    restoredMarkers.clear();
+    if(snapshot.exists()) {
+      Object.entries(snapshot.val()).forEach(([key,val])=>{
+        if(val.restored) restoredMarkers.add(decodeURIComponent(key));
+      });
+    }
+    if(map.getLayer("markers-layer")){
+      map.setPaintProperty("markers-layer","circle-color",markerColorExpression());
+    }
+  });
+
+  // ===== GEOLOCATE CONTROL =====
+  const geolocate = new mapboxgl.GeolocateControl({
+    positionOptions: { enableHighAccuracy: true },
+    trackUserLocation: true,
+    showAccuracyCircle: false
+  });
+  map.addControl(geolocate);
+
+  // ===== POPUP + AUTOFILL SEARCH (# in search bar) =====
+  map.on("click", "markers-layer", async e => {
+    const p = e.features[0].properties;
+    let id = p.MarkerNum || p.markernum;
+    if(!id && p.Description){
+      const d = document.createElement("div");
+      d.innerHTML = p.Description;
+      const td = [...d.querySelectorAll("td")].find(t=>t.textContent.trim()==="MarkerNum");
+      id = td?.nextElementSibling?.textContent.trim();
+    }
+    id = id? String(id).trim(): "Unknown";
+
+    document.getElementById("search-input").value = id;
+
+    const popupDiv = document.createElement("div");
+    popupDiv.innerHTML = `
+      <div style="
+        min-width:250px;
+        max-width:350px;
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        font-family: Arial, sans-serif;
+        ${restoredMarkers.has(id) ? "background:#2b2b2b; color:white; padding:6px; border-radius:4px;" : ""}
+      ">
+        <b>${p.Name || "No Name"}</b>
+        <small>Marker #${id}</small>
+        <div>
+          <input type="checkbox" id="restored">
+          <label for="restored">Restored</label>
+        </div>
+        <div>
+          <label for="notes">Notes:</label>
+          <textarea id="notes" rows="4" style="width:100%; box-sizing:border-box;"></textarea>
+        </div>
+        <div class="saved-msg" id="savedMsg">Saved!</div>
+      </div>
+    `;
+
+    const popup = new mapboxgl.Popup({ maxWidth:"350px" })
+      .setLngLat(e.lngLat)
+      .setDOMContent(popupDiv)
+      .addTo(map);
+
+    const restoredInput = popupDiv.querySelector("#restored");
+    const notesInput = popupDiv.querySelector("#notes");
+    const savedMsg = popupDiv.querySelector("#savedMsg");
+
+    const snap = await db.ref("markers/"+encodeURIComponent(id)).get();
+    if(snap.exists()){
+      restoredInput.checked = snap.val().restored===true;
+      notesInput.value = snap.val().notes || "";
+    }
+
+    const markerRef = db.ref("markers/"+encodeURIComponent(id));
+    const listener = markerRef.on("value", snap=>{
+      if(!snap.exists()) return;
+      restoredInput.checked = snap.val().restored===true;
+      notesInput.value = snap.val().notes || "";
+    });
+
+    async function autoSave(){
+      await markerRef.set({restored:restoredInput.checked, notes:notesInput.value});
+      savedMsg.style.display="block";
+      setTimeout(()=>savedMsg.style.display="none",1000);
+    }
+
+    restoredInput.addEventListener("change", autoSave);
+    notesInput.addEventListener("input", autoSave);
+
+    popup.on("close", ()=> markerRef.off("value", listener));
+  });
+
+  // ===== SEARCH IGNORING PUNCTUATION =====
+  function normalize(str){ return str.toLowerCase().replace(/[\s.,'’"]/g,""); }
+
+  async function searchMarker(){
+    const query = normalize(document.getElementById("search-input").value.trim());
+    if(!query) return;
+    const features = map.querySourceFeatures("markers", { sourceLayer:"HistoricalMarkers" });
+    const match = features.find(f=>{
+      const p = f.properties;
+      let id = p.MarkerNum || p.markernum;
+      if(!id && p.Description){
+        const d = document.createElement("div");
+        d.innerHTML = p.Description;
+        const td = [...d.querySelectorAll("td")].find(t=>t.textContent.trim()==="MarkerNum");
+        id = td?.nextElementSibling?.textContent.trim();
+      }
+      const name = normalize(p.Name||"");
+      const num = normalize(id||"");
+      return name.includes(query) || num===query;
+    });
+    if(match){
+      const coords = match.geometry.coordinates;
+      map.flyTo({center:coords, zoom:17});
+    }else{
+      alert("Marker not found!");
+    }
+  }
+
+  document.getElementById("search-btn").addEventListener("click", searchMarker);
+  document.getElementById("search-input").addEventListener("keypress", e=>{ if(e.key==="Enter") searchMarker(); });
+
+  // ===== MOBILE TOUCH SETTINGS =====
+  map.dragPan.enable();
+  map.touchZoomRotate.enable();
+  map.scrollZoom.enable();
+
+});
+</script>
+
+</body>
+</html>
