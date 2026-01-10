@@ -54,17 +54,18 @@ body {
   gap:5px;
   width: calc(100% - 20px);
   max-width: 315px;
+  font-size: 17px;
 }
 
 #search-input {
   flex:1;
   padding:6px;
-  font-size:11px;
+  font-size:17px;
 }
 
 #search-btn {
   padding:6px 9px;
-  font-size:11px;
+  font-size:17px;
   cursor:pointer;
 }
 
@@ -174,6 +175,8 @@ map.on("load", () => {
     const p = e.features[0].properties;
     const coords = e.features[0].geometry.coordinates;
 
+    // ===== NEW: popup stays in current view, no zoom/pan =====
+
     let id = p.MarkerNum || p.markernum;
     if (!id && p.Description) {
       const d = document.createElement("div");
@@ -185,7 +188,7 @@ map.on("load", () => {
 
     const popupDiv = document.createElement("div");
     popupDiv.innerHTML = `
-      <div id="popup-content" style="min-width:250px; max-width:350px; display:flex; flex-direction:column; gap:6px; font-family: Arial, sans-serif;">
+      <div id="popup-content" style="min-width:250px; max-width:350px; display:flex; flex-direction:column; gap:6px; font-family: Arial, sans-serif; font-size:17px;">
         <b>${p.Name || "No Name"}</b>
         <small>Marker #${id}</small>
 
@@ -216,7 +219,6 @@ map.on("load", () => {
     const directionsBtn = popupDiv.querySelector("#directions-btn");
     const popupContent = popupDiv.querySelector("#popup-content");
 
-    // ===== AUTOSAVE =====
     const snap = await db.ref("markers/" + encodeURIComponent(id)).get();
     if (snap.exists()) {
       restoredInput.checked = snap.val().restored === true;
@@ -262,7 +264,6 @@ map.on("load", () => {
     const query = normalize(document.getElementById("search-input").value.trim());
     if (!query) return;
 
-    // Get all features from source
     const features = map.querySourceFeatures("markers", { sourceLayer: "HistoricalMarkers" });
 
     const match = features.find(f => {
