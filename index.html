@@ -228,7 +228,6 @@ map.on("load", () => {
       if (!snap.exists()) return;
       restoredInput.checked = snap.val().restored === true;
       notesInput.value = snap.val().notes || "";
-      // ===== Change popup background if restored =====
       popupContent.style.backgroundColor = restoredInput.checked ? "#999" : "#fff";
     });
 
@@ -242,20 +241,55 @@ map.on("load", () => {
     restoredInput.addEventListener("change", autoSave);
     notesInput.addEventListener("input", autoSave);
 
-    // ===== DIRECTIONS BUTTON CLICK =====
     directionsBtn.addEventListener("click", () => {
       const url = `https://www.google.com/maps/dir/?api=1&destination=${coords[1]},${coords[0]}`;
       window.open(url, "_blank");
     });
 
-    // Set initial popup color if already restored
-    if (restoredInput.checked) {
-      popupContent.style.backgroundColor = "#999";
-    }
+    if (restoredInput.checked) popupContent.style.backgroundColor = "#999";
 
     popup.on("close", () => {
       markerRef.off("value", listener);
     });
+  });
+
+  // ===== SEARCH FIX =====
+  function normalize(str) {
+    return str.toLowerCase().replace(/[\s.,'’"]/g,"");
+  }
+
+  async function searchMarker() {
+    const query = normalize(document.getElementById("search-input").value.trim());
+    if (!query) return;
+
+    // Get all features from source
+    const features = map.querySourceFeatures("markers", { sourceLayer: "HistoricalMarkers" });
+
+    const match = features.find(f => {
+      const p = f.properties;
+      let id = p.MarkerNum || p.markernum;
+      if (!id && p.Description) {
+        const d = document.createElement("div");
+        d.innerHTML = p.Description;
+        const td = [...d.querySelectorAll("td")].find(t => t.textContent.trim() === "MarkerNum");
+        id = td?.nextElementSibling?.textContent.trim();
+      }
+      const name = normalize(p.Name || "");
+      const num = normalize(id || "");
+      return name.includes(query) || num === query;
+    });
+
+    if (match) {
+      const coords = match.geometry.coordinates;
+      map.flyTo({ center: coords, zoom: 17 });
+    } else {
+      alert("Marker not found!");
+    }
+  }
+
+  document.getElementById("search-btn").addEventListener("click", searchMarker);
+  document.getElementById("search-input").addEventListener("keypress", e => {
+    if(e.key === "Enter") searchMarker();
   });
 
 });
